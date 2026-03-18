@@ -1,4 +1,4 @@
-port: /dev/ttyACM0
+port: /dev/ttyACM1
 baudrate: 1000000
 servos:
   - name: base

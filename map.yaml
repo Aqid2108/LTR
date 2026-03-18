@@ -1,5 +1,5 @@
-leader_yaml: calibrationF.yaml
-follower_yaml: calibrationL.yaml
+leader_yaml: follower.yaml
+follower_yaml: leader.yaml
 pairs:
   - joint: base
     leader_id: 1
