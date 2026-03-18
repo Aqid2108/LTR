@@ -1,12 +1,16 @@
 #include <iostream>
 #include <string>
+#include <limits>
 
-void run_calibration();
-void run_create_mapping();
-void run_leader();
-void run_follower();
+int run_calibrate_all_mode();
+int run_create_mapping_mode();
+int run_leader_mode(const std::string& leader_yaml,
+                    const std::string& follower_yaml,
+                    const std::string& mapping_yaml,
+                    const std::string& follower_ip,
+                    int follower_port);
+int run_follower_mode(const std::string& follower_yaml, int listen_port);
 void run_ping_servos();
-
 int main() {
     while (true) {
         std::cout << "\n=== STS3215 Leader-Follower Menu ===\n";
@@ -18,27 +22,57 @@ int main() {
         std::cout << "6. Exit\n";
         std::cout << "Enter choice: ";
 
-        std::string choice;
-        std::getline(std::cin, choice);
+        int choice;
+        std::cin >> choice;
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
-        try {
-            if (choice == "1") {
-                run_calibration();
-            } else if (choice == "2") {
-                run_create_mapping();
-            } else if (choice == "3") {
-                run_leader();
-            } else if (choice == "4") {
-                run_follower();
-            } else if (choice == "5") {
-                run_ping_servos();
-            } else if (choice == "6") {
-                return 0;
-            } else {
-                std::cout << "Invalid choice.\n";
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "Error: " << e.what() << "\n";
+        if (choice == 1) {
+            run_calibrate_all_mode();
+        }
+        else if (choice == 2) {
+            run_create_mapping_mode();
+        }
+        else if (choice == 3) {
+            std::string leader_yaml, follower_yaml, mapping_yaml, follower_ip;
+            int follower_port;
+
+            std::cout << "\n=== Leader Mode ===\n";
+            std::cout << "Leader YAML path: ";
+            std::cin >> leader_yaml;
+            std::cout << "Follower YAML path: ";
+            std::cin >> follower_yaml;
+            std::cout << "Mapping YAML path: ";
+            std::cin >> mapping_yaml;
+            std::cout << "Follower IP: ";
+            std::cin >> follower_ip;
+            std::cout << "Follower port: ";
+            std::cin >> follower_port;
+
+            run_leader_mode(leader_yaml, follower_yaml, mapping_yaml, follower_ip, follower_port);
+        }
+        else if (choice == 4) {
+            std::string follower_yaml;
+            int listen_port;
+
+            std::cout << "\n=== Follower Mode ===\n";
+            std::cout << "Follower YAML path: ";
+            std::cin >> follower_yaml;
+            std::cout << "Listen port: ";
+            std::cin >> listen_port;
+
+            run_follower_mode(follower_yaml, listen_port);
+        }
+        else if (choice == 5) {
+            run_ping_servos();
+            break;
+        }
+        else if (choice == 6) {
+            break;
+        }
+        else {
+            std::cout << "Invalid choice.\n";
         }
     }
+
+    return 0;
 }

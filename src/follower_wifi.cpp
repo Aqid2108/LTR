@@ -129,3 +129,8 @@ int run_follower_mode(const std::string& follower_yaml, int listen_port) {
     close(server_fd);
     return 0;
 }
+
+
+void run_follower() {
+    // existing follower code here
+}

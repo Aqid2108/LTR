@@ -156,3 +156,7 @@ int run_leader_mode(const std::string& leader_yaml,
     close(sock);
     return 0;
 }
+
+void run_leader() {
+    // existing leader code here
+}

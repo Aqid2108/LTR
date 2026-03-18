@@ -180,3 +180,5 @@ int run_calibrate_all_mode() {
 
     return 0;
 }
+
+void run_calibration();

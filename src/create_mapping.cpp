@@ -155,3 +155,8 @@ int run_create_mapping_mode() {
     print_mapping("Saved mapping", map);
     return 0;
 }
+
+
+void run_create_mapping() {
+    // existing mapping code here
+}
