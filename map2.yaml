@@ -1,0 +1,45 @@
+leader_yaml: leader2.yaml
+follower_yaml: follower2.yaml
+pairs:
+  - joint: base
+    leader_id: 1
+    follower_id: 1
+    invert: false
+    leader_ref: 2192
+    follower_ref: 2192
+    trim: 0
+  - joint: shoulder
+    leader_id: 2
+    follower_id: 2
+    invert: false
+    leader_ref: 1912
+    follower_ref: 1912
+    trim: 0
+  - joint: elbow
+    leader_id: 3
+    follower_id: 3
+    invert: false
+    leader_ref: 1975
+    follower_ref: 1975
+    trim: 0
+  - joint: wrist_pitch
+    leader_id: 4
+    follower_id: 4
+    invert: false
+    leader_ref: 2126
+    follower_ref: 2126
+    trim: 0
+  - joint: wrist_roll
+    leader_id: 5
+    follower_id: 5
+    invert: false
+    leader_ref: 3162
+    follower_ref: 3162
+    trim: 0
+  - joint: gripper
+    leader_id: 6
+    follower_id: 6
+    invert: false
+    leader_ref: 2172
+    follower_ref: 2172
+    trim: 0

@@ -1,0 +1,33 @@
+port: /dev/ttyACM0
+baudrate: 1000000
+servos:
+  - name: servo_1
+    id: 1
+    min: 1051
+    max: 2990
+    invert: false
+  - name: servo_2
+    id: 2
+    min: 3084
+    max: 952
+    invert: false
+  - name: servo_3
+    id: 3
+    min: 3125
+    max: 1199
+    invert: false
+  - name: servo_4
+    id: 4
+    min: 1110
+    max: 3173
+    invert: false
+  - name: servo_5
+    id: 5
+    min: 52
+    max: 4310
+    invert: false
+  - name: servo_6
+    id: 6
+    min: 2508
+    max: 1894
+    invert: false
