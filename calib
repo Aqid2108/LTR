@@ -1,0 +1,17 @@
+servo:
+  name: grip
+  id: 6
+  port: /dev/ttyACM0
+  baudrate: 1000000
+  limits_deg:
+    min: 135
+    max: 225
+  calibration:
+    raw_min: 1270
+    raw_rest: 1873
+    raw_max: 2077
+    rest_deg: 0
+  motion:
+    speed: 600
+    acc: 50
+  invert_direction: false

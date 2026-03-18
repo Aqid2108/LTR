@@ -1,0 +1,13 @@
+servo:
+  name: gL
+  id: 6
+  port: /dev/ttyACM0
+  limits_deg:
+    min: 85
+    max: 130
+  calibration:
+    raw_min: 1176
+    raw_rest: 1668
+    raw_max: 2143
+    rest_deg: 90
+  invert_direction: false

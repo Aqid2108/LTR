@@ -1,0 +1,182 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <limits>
+#include <algorithm>
+#include <filesystem>
+
+#include "common_servo.hpp"
+#include "SCServo.h"
+#include "SMS_STS.h"
+
+namespace fs = std::filesystem;
+
+static void flush_line() {
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+}
+
+static void wait_for_enter(const std::string& msg) {
+    std::cout << msg;
+    std::cin.get();
+}
+
+static std::vector<std::string> detect_candidate_ports() {
+    std::vector<std::string> ports;
+
+    const std::vector<std::string> prefixes = {
+        "/dev/ttyACM",
+        "/dev/ttyUSB",
+        "/dev/ttyS"
+    };
+
+    for (const auto& entry : fs::directory_iterator("/dev")) {
+        std::string path = entry.path().string();
+        for (const auto& p : prefixes) {
+            if (path.rfind(p, 0) == 0) {
+                ports.push_back(path);
+                break;
+            }
+        }
+    }
+
+    std::sort(ports.begin(), ports.end());
+    return ports;
+}
+
+static bool open_servo_port(SMS_STS& sm_st, const std::string& port, int baudrate) {
+    if (sm_st.begin(baudrate, port.c_str())) {
+        return true;
+    }
+    std::cerr << "Failed to open serial port: " << port << "\n";
+    return false;
+}
+
+static int read_servo_position_retry(SMS_STS& sm_st, int id, int attempts = 8) {
+    for (int i = 0; i < attempts; ++i) {
+        int pos = sm_st.ReadPos(id);
+        if (pos >= 0) return pos;
+    }
+    return -1;
+}
+
+static std::vector<int> detect_servo_ids(SMS_STS& sm_st, int id_min = 1, int id_max = 20) {
+    std::vector<int> ids;
+    for (int id = id_min; id <= id_max; ++id) {
+        int pos = read_servo_position_retry(sm_st, id, 3);
+        if (pos >= 0) {
+            ids.push_back(id);
+            std::cout << "Detected servo ID " << id << " at raw position " << pos << "\n";
+        }
+    }
+    return ids;
+}
+
+static std::vector<int> capture_positions(SMS_STS& sm_st, const std::vector<int>& ids) {
+    std::vector<int> positions;
+    positions.reserve(ids.size());
+
+    for (int id : ids) {
+        int pos = read_servo_position_retry(sm_st, id, 8);
+        positions.push_back(pos);
+    }
+
+    return positions;
+}
+
+int run_calibrate_all_mode() {
+    CalibrationData cfg;
+    cfg.baudrate = 1000000;
+
+    std::string output_yaml;
+    std::cout << "\n=== Auto Calibration: All 6 Servos ===\n";
+    std::cout << "Output YAML file: ";
+    std::cin >> output_yaml;
+    flush_line();
+
+    auto ports = detect_candidate_ports();
+    if (ports.empty()) {
+        std::cerr << "No candidate serial ports found under /dev.\n";
+        return 1;
+    }
+
+    std::cout << "\nDetected serial ports:\n";
+    for (size_t i = 0; i < ports.size(); ++i) {
+        std::cout << "  [" << i << "] " << ports[i] << "\n";
+    }
+
+    cfg.port = ports.front();
+    std::cout << "\nSelected port: " << cfg.port << "\n";
+    wait_for_enter("Press Enter to confirm and continue...");
+    std::cout << "Using baudrate: " << cfg.baudrate << "\n";
+
+    SMS_STS sm_st;
+    if (!open_servo_port(sm_st, cfg.port, cfg.baudrate)) {
+        return 1;
+    }
+
+    std::cout << "\nScanning servo IDs...\n";
+    std::vector<int> ids = detect_servo_ids(sm_st, 1, 20);
+
+    if (ids.size() != 6) {
+        std::cerr << "\nExpected 6 servos, but detected " << ids.size() << ".\n";
+        std::cerr << "Detected IDs: ";
+        for (int id : ids) std::cerr << id << " ";
+        std::cerr << "\n";
+        return 1;
+    }
+
+    std::sort(ids.begin(), ids.end());
+
+    std::cout << "\nDetected all 6 servo IDs:\n";
+    for (int id : ids) {
+        std::cout << "  ID " << id << "\n";
+    }
+
+    wait_for_enter("\nMove ALL 6 servos to their MIN positions, then press Enter to capture...");
+    std::vector<int> min_positions = capture_positions(sm_st, ids);
+
+    for (size_t i = 0; i < ids.size(); ++i) {
+        if (min_positions[i] < 0) {
+            std::cerr << "Failed reading MIN for servo ID " << ids[i] << "\n";
+            return 1;
+        }
+    }
+
+    std::cout << "\nCaptured MIN raw positions:\n";
+    for (size_t i = 0; i < ids.size(); ++i) {
+        std::cout << "  ID " << ids[i] << " -> " << min_positions[i] << "\n";
+    }
+
+    wait_for_enter("\nMove ALL 6 servos to their MAX positions, then press Enter to capture...");
+    std::vector<int> max_positions = capture_positions(sm_st, ids);
+
+    for (size_t i = 0; i < ids.size(); ++i) {
+        if (max_positions[i] < 0) {
+            std::cerr << "Failed reading MAX for servo ID " << ids[i] << "\n";
+            return 1;
+        }
+    }
+
+    std::cout << "\nCaptured MAX raw positions:\n";
+    for (size_t i = 0; i < ids.size(); ++i) {
+        std::cout << "  ID " << ids[i] << " -> " << max_positions[i] << "\n";
+    }
+
+    cfg.servos.clear();
+    for (size_t i = 0; i < ids.size(); ++i) {
+        ServoConfig s;
+        s.name = "servo_" + std::to_string(ids[i]);
+        s.id = ids[i];
+        s.min_pos = min_positions[i];
+        s.max_pos = max_positions[i];
+        s.invert = false;
+        cfg.servos.push_back(s);
+    }
+
+    save_calibration_yaml(output_yaml, cfg);
+
+    std::cout << "\nCalibration saved to: " << output_yaml << "\n";
+    print_calibration("Saved calibration", cfg);
+
+    return 0;
+}

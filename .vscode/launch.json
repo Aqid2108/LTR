@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    
+    
+    {
+      "name": "Run servo_menu",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "/home/aqid/LTR/servo_menu",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "/home/aqid/LTR",
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "preLaunchTask": "Build servo app"
+    }
+  ]
+}

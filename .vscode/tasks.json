@@ -1,0 +1,31 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build servo app",
+      "type": "shell",
+      "command": "/usr/bin/g++",
+      "args": [
+        "-std=c++17",
+        "/home/aqid/LTR/main.cpp",
+        "/home/aqid/LTR/src/leader_wifi.cpp",
+        "/home/aqid/LTR/src/follower_wifi.cpp",
+        "/home/aqid/LTR/src/create_mapping.cpp",
+        "/home/aqid/LTR/src/calibrate_servo.cpp",
+
+        "-I/home/aqid/LTR/include",
+        "-I/home/aqid/LTR/lib/SCServo_Linux/include",
+        "/home/aqid/LTR/lib/SCServo_Linux/build/libSCServo.a",
+        "-lyaml-cpp",
+        "-lpthread",
+        "-o",
+        "/home/aqid/LTR/servo_menu"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gcc"]
+    }
+  ]
+}
