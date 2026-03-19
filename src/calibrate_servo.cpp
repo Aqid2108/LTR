@@ -82,7 +82,6 @@ static std::vector<int> capture_positions(SMS_STS& sm_st, const std::vector<int>
 
     return positions;
 }
-
 int run_calibrate_all_mode() {
     CalibrationData cfg;
     cfg.baudrate = 1000000;
@@ -132,45 +131,62 @@ int run_calibrate_all_mode() {
         std::cout << "  ID " << id << "\n";
     }
 
-    wait_for_enter("\nMove ALL 6 servos to their MIN positions, then press Enter to capture...");
-    std::vector<int> min_positions = capture_positions(sm_st, ids);
-
-    for (size_t i = 0; i < ids.size(); ++i) {
-        if (min_positions[i] < 0) {
-            std::cerr << "Failed reading MIN for servo ID " << ids[i] << "\n";
-            return 1;
-        }
-    }
-
-    std::cout << "\nCaptured MIN raw positions:\n";
-    for (size_t i = 0; i < ids.size(); ++i) {
-        std::cout << "  ID " << ids[i] << " -> " << min_positions[i] << "\n";
-    }
-
-    wait_for_enter("\nMove ALL 6 servos to their MAX positions, then press Enter to capture...");
-    std::vector<int> max_positions = capture_positions(sm_st, ids);
-
-    for (size_t i = 0; i < ids.size(); ++i) {
-        if (max_positions[i] < 0) {
-            std::cerr << "Failed reading MAX for servo ID " << ids[i] << "\n";
-            return 1;
-        }
-    }
-
-    std::cout << "\nCaptured MAX raw positions:\n";
-    for (size_t i = 0; i < ids.size(); ++i) {
-        std::cout << "  ID " << ids[i] << " -> " << max_positions[i] << "\n";
-    }
-
     cfg.servos.clear();
+
     for (size_t i = 0; i < ids.size(); ++i) {
+        int id = ids[i];
+
+        std::cout << "\n====================================\n";
+        std::cout << "Calibrating servo " << (i + 1) << " of " << ids.size() << "\n";
+        std::cout << "Servo ID: " << id << "\n";
+
+        int current_pos = read_servo_position_retry(sm_st, id, 8);
+        if (current_pos < 0) {
+            std::cerr << "Failed to read current position for servo ID " << id << "\n";
+            return 1;
+        }
+
+        std::cout << "Current raw position: " << current_pos << "\n";
+
+        wait_for_enter(
+            "Move ONLY this servo to its MIN position, then press Enter to capture...");
+        int min_pos = read_servo_position_retry(sm_st, id, 8);
+        if (min_pos < 0) {
+            std::cerr << "Failed reading MIN for servo ID " << id << "\n";
+            return 1;
+        }
+
+        std::cout << "Captured MIN for ID " << id << ": " << min_pos << "\n";
+
+        wait_for_enter(
+            "Move ONLY this servo to its MAX position, then press Enter to capture...");
+        int max_pos = read_servo_position_retry(sm_st, id, 8);
+        if (max_pos < 0) {
+            std::cerr << "Failed reading MAX for servo ID " << id << "\n";
+            return 1;
+        }
+
+        std::cout << "Captured MAX for ID " << id << ": " << max_pos << "\n";
+
+        if (min_pos == max_pos) {
+            std::cerr << "MIN and MAX are identical for servo ID " << id
+                      << ". Calibration invalid.\n";
+            return 1;
+        }
+
         ServoConfig s;
-        s.name = "servo_" + std::to_string(ids[i]);
-        s.id = ids[i];
-        s.min_pos = min_positions[i];
-        s.max_pos = max_positions[i];
+        s.name = "servo_" + std::to_string(id);
+        s.id = id;
+        s.min_pos = min_pos;
+        s.max_pos = max_pos;
         s.invert = false;
+
         cfg.servos.push_back(s);
+
+        std::cout << "Saved servo ID " << id
+                  << " | min=" << min_pos
+                  << " | max=" << max_pos << "\n";
+        std::cout << "====================================\n";
     }
 
     save_calibration_yaml(output_yaml, cfg);
@@ -180,5 +196,4 @@ int run_calibrate_all_mode() {
 
     return 0;
 }
-
 void run_calibration();

@@ -12,6 +12,7 @@
         "/home/aqid/LTR/src/follower_wifi.cpp",
         "/home/aqid/LTR/src/create_mapping.cpp",
         "/home/aqid/LTR/src/calibrate_servo.cpp",
+        "/home/aqid/LTR/src/lerobot_hybrid.cpp",
         "/home/aqid/LTR/src/ping_servos.cpp",
         "-I/home/aqid/LTR/include",
         "-I/home/aqid/LTR/lib/SCServo_Linux/include",

@@ -3,31 +3,31 @@ baudrate: 1000000
 servos:
   - name: servo_1
     id: 1
-    min: 887
-    max: 2890
+    min: 1021
+    max: 3097
     invert: false
   - name: servo_2
     id: 2
-    min: 3163
-    max: 873
+    min: 3058
+    max: 968
     invert: false
   - name: servo_3
     id: 3
-    min: 2961
-    max: 971
+    min: 3100
+    max: 1185
     invert: false
   - name: servo_4
     id: 4
-    min: 4175
-    max: 2332
+    min: 1143
+    max: 3147
     invert: false
   - name: servo_5
     id: 5
-    min: 52
-    max: 4310
+    min: 2120
+    max: 6000
     invert: false
   - name: servo_6
     id: 6
-    min: 1500
-    max: 2703
+    min: 1813
+    max: 2337
     invert: false

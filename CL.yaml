@@ -1,33 +1,33 @@
-port: /dev/ttyACM1
+port: /dev/ttyACM0
 baudrate: 1000000
 servos:
   - name: servo_1
     id: 1
-    min: 887
-    max: 2890
+    min: 790
+    max: 3063
     invert: false
   - name: servo_2
     id: 2
-    min: 3163
-    max: 873
+    min: 3213
+    max: 1045
     invert: false
   - name: servo_3
     id: 3
-    min: 2961
-    max: 971
+    min: 2950
+    max: 951
     invert: false
   - name: servo_4
     id: 4
-    min: 4175
-    max: 2332
+    min: 3095
+    max: 966
     invert: false
   - name: servo_5
     id: 5
-    min: 52
-    max: 4310
+    min: 7180
+    max: 3184
     invert: false
   - name: servo_6
     id: 6
-    min: 1500
-    max: 2703
+    min: 1504
+    max: 2708
     invert: false

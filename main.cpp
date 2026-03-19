@@ -1,7 +1,7 @@
 #include <iostream>
 #include <string>
 #include <limits>
-
+#include "lerobot_hybrid.hpp"
 int run_calibrate_all_mode();
 int run_create_mapping_mode();
 int run_leader_mode(const std::string& leader_yaml,
@@ -19,7 +19,8 @@ int main() {
         std::cout << "3. Run leader\n";
         std::cout << "4. Run follower\n";
         std::cout << "5. Ping servos\n";
-        std::cout << "6. Exit\n";
+        std::cout << "6. Run LeRobot hybrid follow\n";
+        std::cout << "7. Exit\n";
         std::cout << "Enter choice: ";
 
         int choice;
@@ -67,6 +68,34 @@ int main() {
             break;
         }
         else if (choice == 6) {
+            std::string leader_yaml, follower_yaml, mapping_yaml, follower_ip;
+            int follower_port;
+
+            std::cout << "Leader YAML path: ";
+            std::getline(std::cin, leader_yaml);
+
+            std::cout << "Follower YAML path: ";
+            std::getline(std::cin, follower_yaml);
+
+            std::cout << "Mapping YAML path: ";
+            std::getline(std::cin, mapping_yaml);
+
+            std::cout << "Follower IP: ";
+            std::getline(std::cin, follower_ip);
+
+            std::cout << "Follower port: ";
+            std::cin >> follower_port;
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+            run_lerobot_hybrid_mode(
+                leader_yaml,
+                follower_yaml,
+                mapping_yaml,
+                follower_ip,
+                follower_port
+            );
+        }
+        else if (choice == 7) {
             break;
         }
         else {
