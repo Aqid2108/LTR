@@ -14,12 +14,13 @@ void run_ping_servos();
 int main() {
     while (true) {
         std::cout << "\n=== STS3215 Leader-Follower Menu ===\n";
+        std::cout << "Recommended order: 1 on each arm, then 4 on follower laptop, then 6 on leader laptop.\n";
         std::cout << "1. Calibrate all 6 servos\n";
         std::cout << "2. Create leader-follower mapping/alignment\n";
         std::cout << "3. Run leader\n";
-        std::cout << "4. Run follower\n";
+        std::cout << "4. Run follower (run first on follower laptop)\n";
         std::cout << "5. Ping servos\n";
-        std::cout << "6. Run LeRobot hybrid follow\n";
+        std::cout << "6. Run LeRobot hybrid follow (run second on leader laptop)\n";
         std::cout << "7. Exit\n";
         std::cout << "Enter choice: ";
 
@@ -56,6 +57,7 @@ int main() {
             int listen_port;
 
             std::cout << "\n=== Follower Mode ===\n";
+            std::cout << "Run this first on the follower laptop, then start option 6 on the leader laptop.\n";
             std::cout << "Follower YAML path: ";
             std::cin >> follower_yaml;
             std::cout << "Listen port: ";
@@ -71,6 +73,9 @@ int main() {
             std::string leader_yaml, follower_yaml, follower_ip;
             int follower_port;
 
+            std::cout << "\n=== LeRobot Hybrid Follow ===\n";
+            std::cout << "Run option 4 first on the follower laptop.\n";
+            std::cout << "This mode does not use a mapping YAML; it matches servo IDs 1-6.\n";
             std::cout << "Leader YAML path: ";
             std::getline(std::cin, leader_yaml);
 

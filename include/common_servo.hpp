@@ -6,6 +6,9 @@
 #include <iostream>
 #include <cmath>
 #include <algorithm>
+#include <array>
+#include <set>
+#include <sstream>
 #include <stdexcept>
 #include <yaml-cpp/yaml.h>
 
@@ -198,4 +201,70 @@ inline void print_mapping(const std::string& label, const MappingData& map) {
             << "\n";
     }
     std::cout << std::endl;
+}
+
+inline std::vector<int> expected_arm_servo_ids() {
+    return {1, 2, 3, 4, 5, 6};
+}
+
+inline std::string expected_arm_servo_ids_text() {
+    return "1, 2, 3, 4, 5, 6";
+}
+
+inline std::string joint_name_for_servo_id(int id) {
+    switch (id) {
+        case 1: return "base";
+        case 2: return "shoulder";
+        case 3: return "elbow";
+        case 4: return "wrist_pitch";
+        case 5: return "wrist_roll";
+        case 6: return "gripper";
+        default: return "servo_" + std::to_string(id);
+    }
+}
+
+inline std::string join_ints(const std::vector<int>& values) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) oss << ", ";
+        oss << values[i];
+    }
+    return oss.str();
+}
+
+inline bool validate_expected_arm_servos(const CalibrationData& cfg,
+                                         std::string& error,
+                                         std::vector<int>* sorted_ids_out = nullptr) {
+    std::vector<int> ids;
+    ids.reserve(cfg.servos.size());
+
+    std::set<int> seen;
+    for (const auto& servo : cfg.servos) {
+        ids.push_back(servo.id);
+        if (!seen.insert(servo.id).second) {
+            error = "Duplicate servo ID found in YAML: " + std::to_string(servo.id);
+            return false;
+        }
+    }
+
+    std::sort(ids.begin(), ids.end());
+    if (sorted_ids_out) {
+        *sorted_ids_out = ids;
+    }
+
+    const std::vector<int> expected = expected_arm_servo_ids();
+    if (ids.size() != expected.size()) {
+        error = "Expected exactly 6 servos with IDs [" + expected_arm_servo_ids_text() +
+                "], but found " + std::to_string(ids.size()) +
+                " servo(s): [" + join_ints(ids) + "]";
+        return false;
+    }
+
+    if (ids != expected) {
+        error = "Expected servo IDs [" + expected_arm_servo_ids_text() +
+                "], but found [" + join_ints(ids) + "]";
+        return false;
+    }
+
+    return true;
 }

@@ -82,12 +82,21 @@ static std::vector<int> capture_positions(SMS_STS& sm_st, const std::vector<int>
 
     return positions;
 }
+
+static bool has_duplicate_ids(const std::vector<int>& ids) {
+    std::vector<int> sorted = ids;
+    std::sort(sorted.begin(), sorted.end());
+    return std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end();
+}
+
 int run_calibrate_all_mode() {
     CalibrationData cfg;
     cfg.baudrate = 1000000;
 
     std::string output_yaml;
     std::cout << "\n=== Auto Calibration: All 6 Servos ===\n";
+    std::cout << "This mode expects one full arm with servo IDs ["
+              << expected_arm_servo_ids_text() << "].\n";
     std::cout << "Output YAML file: ";
     std::cin >> output_yaml;
     flush_line();
@@ -116,19 +125,25 @@ int run_calibrate_all_mode() {
     std::cout << "\nScanning servo IDs...\n";
     std::vector<int> ids = detect_servo_ids(sm_st, 1, 20);
 
-    if (ids.size() != 6) {
-        std::cerr << "\nExpected 6 servos, but detected " << ids.size() << ".\n";
-        std::cerr << "Detected IDs: ";
-        for (int id : ids) std::cerr << id << " ";
-        std::cerr << "\n";
+    if (has_duplicate_ids(ids)) {
+        std::cerr << "\nDetected duplicate servo IDs during scan: ["
+                  << join_ints(ids) << "]\n";
         return 1;
     }
 
     std::sort(ids.begin(), ids.end());
 
+    const std::vector<int> expected_ids = expected_arm_servo_ids();
+    if (ids.size() != expected_ids.size() || ids != expected_ids) {
+        std::cerr << "\nCalibration requires exactly 6 reachable servos with IDs ["
+                  << expected_arm_servo_ids_text() << "].\n";
+        std::cerr << "Detected IDs: [" << join_ints(ids) << "]\n";
+        return 1;
+    }
+
     std::cout << "\nDetected all 6 servo IDs:\n";
     for (int id : ids) {
-        std::cout << "  ID " << id << "\n";
+        std::cout << "  ID " << id << " (" << joint_name_for_servo_id(id) << ")\n";
     }
 
     cfg.servos.clear();
@@ -138,7 +153,9 @@ int run_calibrate_all_mode() {
 
         std::cout << "\n====================================\n";
         std::cout << "Calibrating servo " << (i + 1) << " of " << ids.size() << "\n";
-        std::cout << "Servo ID: " << id << "\n";
+        std::cout << "Servo ID: " << id
+                  << " (" << joint_name_for_servo_id(id) << ")\n";
+        std::cout << "Only move this one joint while capturing min/max.\n";
 
         int current_pos = read_servo_position_retry(sm_st, id, 8);
         if (current_pos < 0) {
@@ -149,7 +166,7 @@ int run_calibrate_all_mode() {
         std::cout << "Current raw position: " << current_pos << "\n";
 
         wait_for_enter(
-            "Move ONLY this servo to its MIN position, then press Enter to capture...");
+            "Move ONLY this servo to its MIN physical limit, then press Enter to capture...");
         int min_pos = read_servo_position_retry(sm_st, id, 8);
         if (min_pos < 0) {
             std::cerr << "Failed reading MIN for servo ID " << id << "\n";
@@ -159,7 +176,7 @@ int run_calibrate_all_mode() {
         std::cout << "Captured MIN for ID " << id << ": " << min_pos << "\n";
 
         wait_for_enter(
-            "Move ONLY this servo to its MAX position, then press Enter to capture...");
+            "Move ONLY this servo to its MAX physical limit, then press Enter to capture...");
         int max_pos = read_servo_position_retry(sm_st, id, 8);
         if (max_pos < 0) {
             std::cerr << "Failed reading MAX for servo ID " << id << "\n";
@@ -174,8 +191,15 @@ int run_calibrate_all_mode() {
             return 1;
         }
 
+        if (std::abs(max_pos - min_pos) < 32) {
+            std::cerr << "MIN/MAX span too small for servo ID " << id
+                      << " (" << min_pos << " to " << max_pos << ").\n";
+            std::cerr << "Move the joint through a real range and calibrate again.\n";
+            return 1;
+        }
+
         ServoConfig s;
-        s.name = "servo_" + std::to_string(id);
+        s.name = joint_name_for_servo_id(id);
         s.id = id;
         s.min_pos = min_pos;
         s.max_pos = max_pos;
