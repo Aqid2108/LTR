@@ -68,7 +68,7 @@ int main() {
             break;
         }
         else if (choice == 6) {
-            std::string leader_yaml, follower_yaml, mapping_yaml, follower_ip;
+            std::string leader_yaml, follower_yaml, follower_ip;
             int follower_port;
 
             std::cout << "Leader YAML path: ";
@@ -76,9 +76,6 @@ int main() {
 
             std::cout << "Follower YAML path: ";
             std::getline(std::cin, follower_yaml);
-
-            std::cout << "Mapping YAML path: ";
-            std::getline(std::cin, mapping_yaml);
 
             std::cout << "Follower IP: ";
             std::getline(std::cin, follower_ip);
@@ -90,7 +87,6 @@ int main() {
             run_lerobot_hybrid_mode(
                 leader_yaml,
                 follower_yaml,
-                mapping_yaml,
                 follower_ip,
                 follower_port
             );

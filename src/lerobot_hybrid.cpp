@@ -1,5 +1,7 @@
 #include "lerobot_hybrid.hpp"
 #include "common_servo.hpp"
+#include "SCServo.h"
+#include "SMS_STS.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -16,15 +18,8 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include "SMS_STS.h"
-namespace {
 
-struct MappingEntry {
-    int leader_id = 0;
-    int follower_id = 0;
-    bool invert = false;
-    int trim = 0;
-};
+namespace {
 
 struct JointRef {
     int leader_start = 0;
@@ -43,7 +38,7 @@ int clamp_int(int v, int lo, int hi) {
 }
 
 double safe_range(int a, int b) {
-    double r = std::abs(double(b - a));
+    double r = std::abs(static_cast<double>(b - a));
     return (r < 1.0) ? 1.0 : r;
 }
 
@@ -57,19 +52,23 @@ bool load_servo_list(const std::string& path,
         port = root["port"].as<std::string>();
         baudrate = root["baudrate"].as<int>();
 
+        YAML::Node arr = root["servos"];
+        if (!arr || !arr.IsSequence()) {
+            std::cerr << "Invalid servo YAML: missing servos in " << path << "\n";
+            return false;
+        }
+
         servos.clear();
-        for (const auto& s : root["servos"]) {
+        for (const auto& s : arr) {
             ServoConfig sc{};
             sc.name = s["name"].as<std::string>();
             sc.id = s["id"].as<int>();
             sc.min_pos = s["min"].as<int>();
             sc.max_pos = s["max"].as<int>();
-
-            // only set fields that definitely exist in your ServoConfig
-            sc.invert = s["invert"].as<bool>();
-
+            sc.invert = s["invert"] ? s["invert"].as<bool>() : false;
             servos.push_back(sc);
         }
+
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Failed to load servo YAML: " << path << "\n";
@@ -78,85 +77,86 @@ bool load_servo_list(const std::string& path,
     }
 }
 
-bool load_mapping_config(const std::string& path,
-                         std::vector<MappingEntry>& mappings) {
-    try {
-        YAML::Node root = YAML::LoadFile(path);
-        YAML::Node maps = root["mappings"];
-        if (!maps || !maps.IsSequence()) {
-            std::cerr << "Invalid mapping YAML: missing mappings\n";
-            return false;
-        }
-
-        mappings.clear();
-        for (const auto& m : maps) {
-            MappingEntry e{};
-            e.leader_id = m["leader_id"].as<int>();
-            e.follower_id = m["follower_id"].as<int>();
-            e.invert = m["invert"] ? m["invert"].as<bool>() : false;
-            e.trim = m["trim"] ? m["trim"].as<int>() : 0;
-            mappings.push_back(e);
-        }
+bool open_servo_port(SMS_STS& sm_st, const std::string& port, int baudrate) {
+    if (sm_st.begin(baudrate, port.c_str())) {
         return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to load mapping YAML: " << path << "\n";
-        std::cerr << e.what() << "\n";
-        return false;
     }
+    std::cerr << "Failed to open serial port: " << port << "\n";
+    return false;
 }
 
-const ServoConfig* find_servo_by_id(const std::vector<ServoConfig>& servos, int id) {
-    for (const auto& s : servos) {
-        if (s.id == id) return &s;
+int read_servo_position_retry(SMS_STS& sm_st, int id, int attempts = 8) {
+    for (int i = 0; i < attempts; ++i) {
+        int pos = sm_st.ReadPos(id);
+        if (pos >= 0) return pos;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    return nullptr;
+    return -1;
 }
 
 int map_absolute_leader_to_follower(const ServoConfig& leader_servo,
                                     const ServoConfig& follower_servo,
-                                    const MappingEntry& mapping,
                                     int leader_now) {
     double leader_span = safe_range(leader_servo.min_pos, leader_servo.max_pos);
-    double norm = (leader_now - leader_servo.min_pos) / leader_span;
+    double norm =
+        (static_cast<double>(leader_now) - static_cast<double>(leader_servo.min_pos)) / leader_span;
+
     norm = std::clamp(norm, 0.0, 1.0);
 
-    bool effective_invert = mapping.invert ^ leader_servo.invert ^ follower_servo.invert;
+    bool effective_invert = leader_servo.invert ^ follower_servo.invert;
     if (effective_invert) {
         norm = 1.0 - norm;
     }
 
-    double follower_span = double(follower_servo.max_pos - follower_servo.min_pos);
-    int target = int(std::lround(follower_servo.min_pos + norm * follower_span));
-    target += mapping.trim;
+    double follower_span =
+        static_cast<double>(follower_servo.max_pos - follower_servo.min_pos);
+
+    int target = static_cast<int>(std::lround(
+        static_cast<double>(follower_servo.min_pos) + norm * follower_span
+    ));
 
     return clamp_int(target, follower_servo.min_pos, follower_servo.max_pos);
 }
 
 int compute_relative_target(const ServoConfig& leader_servo,
                             const ServoConfig& follower_servo,
-                            const MappingEntry& mapping,
                             int leader_now,
                             const JointRef& ref) {
     double leader_span = safe_range(leader_servo.min_pos, leader_servo.max_pos);
-    double delta_norm = (leader_now - ref.leader_start) / leader_span;
+    double delta_norm =
+        (static_cast<double>(leader_now) - static_cast<double>(ref.leader_start)) / leader_span;
 
-    bool effective_invert = mapping.invert ^ leader_servo.invert ^ follower_servo.invert;
+    bool effective_invert = leader_servo.invert ^ follower_servo.invert;
     if (effective_invert) {
         delta_norm = -delta_norm;
     }
 
-    double follower_span = double(follower_servo.max_pos - follower_servo.min_pos);
-    int target = int(std::lround(ref.follower_start + delta_norm * follower_span));
-    target += mapping.trim;
+    double follower_span =
+        static_cast<double>(follower_servo.max_pos - follower_servo.min_pos);
+
+    int target = static_cast<int>(std::lround(
+        static_cast<double>(ref.follower_start) + delta_norm * follower_span
+    ));
 
     return clamp_int(target, follower_servo.min_pos, follower_servo.max_pos);
+}
+
+bool send_follow_packet(int sock,
+                        const sockaddr_in& follower_addr,
+                        const FollowPacket& pkt) {
+    ssize_t sent = sendto(sock,
+                          &pkt,
+                          sizeof(pkt),
+                          0,
+                          reinterpret_cast<const sockaddr*>(&follower_addr),
+                          sizeof(follower_addr));
+    return sent >= 0;
 }
 
 } // namespace
 
 int run_lerobot_hybrid_mode(const std::string& leader_yaml,
                             const std::string& follower_yaml,
-                            const std::string& mapping_yaml,
                             const std::string& follower_ip,
                             int follower_port) {
     std::cout << "\n=== LeRobot Hybrid Follow Mode ===\n";
@@ -167,29 +167,60 @@ int run_lerobot_hybrid_mode(const std::string& leader_yaml,
 
     std::vector<ServoConfig> leader_servos;
     std::vector<ServoConfig> follower_servos;
-    std::vector<MappingEntry> mappings;
 
     if (!load_servo_list(leader_yaml, leader_port, leader_baudrate, leader_servos)) {
         return 1;
     }
+
     if (!load_servo_list(follower_yaml, follower_port_name, follower_baudrate, follower_servos)) {
         return 1;
     }
-    if (!load_mapping_config(mapping_yaml, mappings)) {
+
+    if (leader_servos.size() != follower_servos.size()) {
+        std::cerr << "Leader/follower servo count mismatch.\n";
+        std::cerr << "Leader servos: " << leader_servos.size() << "\n";
+        std::cerr << "Follower servos: " << follower_servos.size() << "\n";
         return 1;
     }
 
-    if (mappings.empty()) {
-        std::cerr << "No mappings found.\n";
+    if (leader_servos.empty()) {
+        std::cerr << "No servos found in YAML files.\n";
         return 1;
     }
 
-    // IMPORTANT:
-    // Replace SMS_STS with whatever class your working files already use.
+    if (leader_servos.size() > 16) {
+        std::cerr << "Too many servos. Max supported is 16.\n";
+        return 1;
+    }
+
+    std::cout << "\nLeader YAML: " << leader_yaml << "\n";
+    std::cout << "Follower YAML: " << follower_yaml << "\n";
+    std::cout << "Leader port: " << leader_port << "\n";
+    std::cout << "Leader baudrate: " << leader_baudrate << "\n";
+    std::cout << "Follower IP: " << follower_ip << "\n";
+    std::cout << "Follower port: " << follower_port << "\n";
+
+    std::cout << "\nIMPORTANT:\n";
+    std::cout << "This mode does NOT use a mapping YAML.\n";
+    std::cout << "Leader and follower are matched by servo order in the YAML files.\n";
+    std::cout << "Place both arms in IDENTICAL physical positions before continuing.\n";
+    std::cout << "Ensure base, shoulder, elbow, wrist, and gripper all match.\n";
+    std::cout << "Make sure the follower arm has enough room to move.\n";
+    std::cout << "Press ENTER only when both arms are in the same pose...";
+    std::cin.get();
+
     SMS_STS leader_io;
-    if (leader_io.begin(leader_baudrate, leader_port.c_str()) != 1) {
-        std::cerr << "Failed to open leader port: " << leader_port << "\n";
+    if (!open_servo_port(leader_io, leader_port, leader_baudrate)) {
         return 1;
+    }
+
+    for (size_t i = 0; i < leader_servos.size(); ++i) {
+        int pos = read_servo_position_retry(leader_io, leader_servos[i].id, 8);
+        if (pos < 0) {
+            std::cerr << "Failed to read leader servo ID " << leader_servos[i].id << "\n";
+            leader_io.end();
+            return 1;
+        }
     }
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -210,89 +241,71 @@ int run_lerobot_hybrid_mode(const std::string& leader_yaml,
         return 1;
     }
 
-    std::cout << "Leader port: " << leader_port << "\n";
-    std::cout << "Leader baudrate: " << leader_baudrate << "\n";
-    std::cout << "Follower target: " << follower_ip << ":" << follower_port << "\n";
-    std::cout << "\nPlace both arms in a safe, roughly matching pose.\n";
-    std::cout << "Press ENTER to align follower to leader...";
-    std::cin.get();
-
-    std::vector<JointRef> refs(mappings.size());
+    std::vector<JointRef> refs(leader_servos.size());
 
     // Phase 1: absolute align
-    {
-        FollowPacket pkt{};
-        pkt.count = static_cast<int>(mappings.size());
+    std::cout << "\nAligning follower to leader...\n";
+    std::cout << "Do NOT touch the arms.\n";
 
-        std::cout << "\nAligning follower to leader...\n";
+    FollowPacket align_pkt{};
+    align_pkt.count = static_cast<int>(leader_servos.size());
 
-        for (size_t i = 0; i < mappings.size(); ++i) {
-            const auto& map = mappings[i];
+    for (size_t i = 0; i < leader_servos.size(); ++i) {
+        const ServoConfig& ls = leader_servos[i];
+        const ServoConfig& fs = follower_servos[i];
 
-            const ServoConfig* ls = find_servo_by_id(leader_servos, map.leader_id);
-            const ServoConfig* fs = find_servo_by_id(follower_servos, map.follower_id);
-
-            if (!ls || !fs) {
-                std::cerr << "Mapping error: missing servo id.\n";
-                close(sock);
-                leader_io.end();
-                return 1;
-            }
-
-            int leader_now = leader_io.ReadPos(ls->id);
-            int follower_target_pos = map_absolute_leader_to_follower(*ls, *fs, map, leader_now);
-
-            pkt.ids[i] = fs->id;
-            pkt.positions[i] = follower_target_pos;
-
-            refs[i].follower_start = follower_target_pos;
-            refs[i].last_sent = follower_target_pos;
-
-            std::cout << "Joint " << (i + 1)
-                      << ": leader_id=" << ls->id
-                      << " raw=" << leader_now
-                      << " -> follower_id=" << fs->id
-                      << " target=" << follower_target_pos
-                      << "\n";
-        }
-
-        ssize_t sent = sendto(sock,
-                              &pkt,
-                              sizeof(pkt),
-                              0,
-                              reinterpret_cast<sockaddr*>(&follower_addr),
-                              sizeof(follower_addr));
-
-        if (sent < 0) {
-            std::cerr << "Failed to send alignment packet.\n";
+        int leader_now = read_servo_position_retry(leader_io, ls.id, 8);
+        if (leader_now < 0) {
+            std::cerr << "Failed to read leader servo ID " << ls.id << " during alignment.\n";
             close(sock);
             leader_io.end();
             return 1;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1200));
-    }
+        int follower_target = map_absolute_leader_to_follower(ls, fs, leader_now);
 
-    // Phase 2: capture reference
-    std::cout << "Alignment complete.\n";
-    std::cout << "Capturing reference pose...\n";
+        align_pkt.ids[i] = fs.id;
+        align_pkt.positions[i] = follower_target;
 
-    for (size_t i = 0; i < mappings.size(); ++i) {
-        const auto& map = mappings[i];
-        const ServoConfig* ls = find_servo_by_id(leader_servos, map.leader_id);
-
-        if (!ls) {
-            std::cerr << "Reference capture failed: missing leader servo.\n";
-            close(sock);
-            leader_io.end();
-            return 1;
-        }
-
-        refs[i].leader_start = leader_io.ReadPos(ls->id);
+        refs[i].follower_start = follower_target;
+        refs[i].last_sent = follower_target;
 
         std::cout << "Joint " << (i + 1)
-                  << " leader_start=" << refs[i].leader_start
-                  << " follower_start=" << refs[i].follower_start
+                  << " | leader_id=" << ls.id
+                  << " raw=" << leader_now
+                  << " -> follower_id=" << fs.id
+                  << " target=" << follower_target
+                  << "\n";
+    }
+
+    if (!send_follow_packet(sock, follower_addr, align_pkt)) {
+        std::cerr << "Failed to send alignment packet.\n";
+        close(sock);
+        leader_io.end();
+        return 1;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+
+    // Phase 2: capture reference
+    std::cout << "\nAlignment complete.\n";
+    std::cout << "Capturing reference pose...\n";
+
+    for (size_t i = 0; i < leader_servos.size(); ++i) {
+        const ServoConfig& ls = leader_servos[i];
+        int leader_now = read_servo_position_retry(leader_io, ls.id, 8);
+        if (leader_now < 0) {
+            std::cerr << "Failed to read leader servo ID " << ls.id << " during reference capture.\n";
+            close(sock);
+            leader_io.end();
+            return 1;
+        }
+
+        refs[i].leader_start = leader_now;
+
+        std::cout << "Joint " << (i + 1)
+                  << " | leader_start=" << refs[i].leader_start
+                  << " | follower_start=" << refs[i].follower_start
                   << "\n";
     }
 
@@ -300,25 +313,24 @@ int run_lerobot_hybrid_mode(const std::string& leader_yaml,
     std::cout << "Move the leader arm by hand.\n";
     std::cout << "Press Ctrl+C to stop.\n";
 
+    // Phase 3: relative follow
     while (true) {
         FollowPacket pkt{};
-        pkt.count = static_cast<int>(mappings.size());
+        pkt.count = static_cast<int>(leader_servos.size());
 
-        for (size_t i = 0; i < mappings.size(); ++i) {
-            const auto& map = mappings[i];
+        for (size_t i = 0; i < leader_servos.size(); ++i) {
+            const ServoConfig& ls = leader_servos[i];
+            const ServoConfig& fs = follower_servos[i];
 
-            const ServoConfig* ls = find_servo_by_id(leader_servos, map.leader_id);
-            const ServoConfig* fs = find_servo_by_id(follower_servos, map.follower_id);
-
-            if (!ls || !fs) {
-                std::cerr << "Runtime mapping error.\n";
+            int leader_now = read_servo_position_retry(leader_io, ls.id, 8);
+            if (leader_now < 0) {
+                std::cerr << "Failed to read leader servo ID " << ls.id << " during follow.\n";
                 close(sock);
                 leader_io.end();
                 return 1;
             }
 
-            int leader_now = leader_io.ReadPos(ls->id);
-            int target = compute_relative_target(*ls, *fs, map, leader_now, refs[i]);
+            int target = compute_relative_target(ls, fs, leader_now, refs[i]);
 
             if (refs[i].last_sent != std::numeric_limits<int>::min() &&
                 std::abs(target - refs[i].last_sent) < 4) {
@@ -327,16 +339,13 @@ int run_lerobot_hybrid_mode(const std::string& leader_yaml,
                 refs[i].last_sent = target;
             }
 
-            pkt.ids[i] = fs->id;
+            pkt.ids[i] = fs.id;
             pkt.positions[i] = target;
         }
 
-        sendto(sock,
-               &pkt,
-               sizeof(pkt),
-               0,
-               reinterpret_cast<sockaddr*>(&follower_addr),
-               sizeof(follower_addr));
+        if (!send_follow_packet(sock, follower_addr, pkt)) {
+            std::cerr << "sendto failed while sending follow packet.\n";
+        }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
