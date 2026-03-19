@@ -1,0 +1,39 @@
+port: /dev/ttyACM0
+baudrate: 1000000
+servos:
+  - name: base
+    id: 1
+    min: 1064
+    max: 2839
+    rest: 1951
+    invert: false
+  - name: shoulder
+    id: 2
+    min: 1071
+    max: 3020
+    rest: 2045
+    invert: false
+  - name: elbow
+    id: 3
+    min: 1191
+    max: 3027
+    rest: 2109
+    invert: false
+  - name: wrist_pitch
+    id: 4
+    min: 1204
+    max: 3122
+    rest: 2163
+    invert: false
+  - name: wrist_roll
+    id: 5
+    min: 169
+    max: 3000
+    rest: 1584
+    invert: false
+  - name: gripper
+    id: 6
+    min: 2279
+    max: 2298
+    rest: 2288
+    invert: false
