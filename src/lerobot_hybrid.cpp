@@ -1,5 +1,6 @@
 #include "lerobot_hybrid.hpp"
 #include "common_servo.hpp"
+#include "follow_protocol.hpp"
 #include "SCServo.h"
 #include "SMS_STS.h"
 
@@ -12,7 +13,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <cstring>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -30,19 +30,22 @@ struct JointRef {
     int last_sent = std::numeric_limits<int>::min();
 };
 
-struct FollowPacket {
-    int count = 0;
-    int ids[16]{};
-    int positions[16]{};
-};
-
 int clamp_int(int v, int lo, int hi) {
     return std::max(lo, std::min(hi, v));
 }
 
-double safe_range(int a, int b) {
-    double r = std::abs(static_cast<double>(b - a));
-    return (r < 1.0) ? 1.0 : r;
+double signed_span(const ServoConfig& servo) {
+    double span = static_cast<double>(servo.max_pos - servo.min_pos);
+    if (std::abs(span) < 1.0) {
+        return (span < 0.0) ? -1.0 : 1.0;
+    }
+    return span;
+}
+
+int clamp_to_servo_range(const ServoConfig& servo, int raw) {
+    int lo = std::min(servo.min_pos, servo.max_pos);
+    int hi = std::max(servo.min_pos, servo.max_pos);
+    return clamp_int(raw, lo, hi);
 }
 
 bool load_servo_list(const std::string& path,
@@ -100,7 +103,7 @@ int read_servo_position_retry(SMS_STS& sm_st, int id, int attempts = 8) {
 int map_absolute_leader_to_follower(const ServoConfig& leader_servo,
                                     const ServoConfig& follower_servo,
                                     int leader_now) {
-    double leader_span = safe_range(leader_servo.min_pos, leader_servo.max_pos);
+    double leader_span = signed_span(leader_servo);
     double norm =
         (static_cast<double>(leader_now) - static_cast<double>(leader_servo.min_pos)) / leader_span;
 
@@ -111,21 +114,20 @@ int map_absolute_leader_to_follower(const ServoConfig& leader_servo,
         norm = 1.0 - norm;
     }
 
-    double follower_span =
-        static_cast<double>(follower_servo.max_pos - follower_servo.min_pos);
+    double follower_span = signed_span(follower_servo);
 
     int target = static_cast<int>(std::lround(
         static_cast<double>(follower_servo.min_pos) + norm * follower_span
     ));
 
-    return clamp_int(target, follower_servo.min_pos, follower_servo.max_pos);
+    return clamp_to_servo_range(follower_servo, target);
 }
 
 int compute_relative_target(const ServoConfig& leader_servo,
                             const ServoConfig& follower_servo,
                             int leader_now,
                             const JointRef& ref) {
-    double leader_span = safe_range(leader_servo.min_pos, leader_servo.max_pos);
+    double leader_span = signed_span(leader_servo);
     double delta_norm =
         (static_cast<double>(leader_now) - static_cast<double>(ref.leader_start)) / leader_span;
 
@@ -134,26 +136,80 @@ int compute_relative_target(const ServoConfig& leader_servo,
         delta_norm = -delta_norm;
     }
 
-    double follower_span =
-        static_cast<double>(follower_servo.max_pos - follower_servo.min_pos);
+    double follower_span = signed_span(follower_servo);
 
     int target = static_cast<int>(std::lround(
         static_cast<double>(ref.follower_start) + delta_norm * follower_span
     ));
 
-    return clamp_int(target, follower_servo.min_pos, follower_servo.max_pos);
+    return clamp_to_servo_range(follower_servo, target);
 }
 
 bool send_follow_packet(int sock,
                         const sockaddr_in& follower_addr,
-                        const FollowPacket& pkt) {
+                        const FollowPacketData& pkt) {
+    FollowWireMessage msg{};
+    msg.type = FollowPacketType::Command;
+    msg.data = pkt;
+
+    std::array<unsigned char, kFollowWirePacketSize> buf{};
+    serialize_follow_message(msg, buf);
+
     ssize_t sent = sendto(sock,
-                          &pkt,
-                          sizeof(pkt),
+                          buf.data(),
+                          buf.size(),
                           0,
                           reinterpret_cast<const sockaddr*>(&follower_addr),
                           sizeof(follower_addr));
     return sent >= 0;
+}
+
+bool wait_for_handshake_ack(int sock, const sockaddr_in& follower_addr) {
+    FollowWireMessage hello{};
+    hello.type = FollowPacketType::HandshakeRequest;
+
+    std::array<unsigned char, kFollowWirePacketSize> hello_buf{};
+    serialize_follow_message(hello, hello_buf);
+
+    ssize_t sent = sendto(sock,
+                          hello_buf.data(),
+                          hello_buf.size(),
+                          0,
+                          reinterpret_cast<const sockaddr*>(&follower_addr),
+                          sizeof(follower_addr));
+    if (sent < 0) {
+        return false;
+    }
+
+    timeval timeout{};
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    std::array<unsigned char, kFollowWirePacketSize> reply_buf{};
+    sockaddr_in sender_addr{};
+    socklen_t sender_len = sizeof(sender_addr);
+    ssize_t bytes = recvfrom(sock,
+                             reply_buf.data(),
+                             reply_buf.size(),
+                             0,
+                             reinterpret_cast<sockaddr*>(&sender_addr),
+                             &sender_len);
+
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    if (bytes < 0) {
+        return false;
+    }
+
+    FollowWireMessage reply{};
+    if (!deserialize_follow_message(reply_buf.data(), static_cast<std::size_t>(bytes), reply)) {
+        return false;
+    }
+
+    return reply.type == FollowPacketType::HandshakeAck;
 }
 
 std::map<int, ServoConfig> build_servo_map(const std::vector<ServoConfig>& servos) {
@@ -295,13 +351,23 @@ int run_lerobot_hybrid_mode(const std::string& leader_yaml,
         return 1;
     }
 
+    std::cout << "\nChecking follower UDP link...\n";
+    if (!wait_for_handshake_ack(sock, follower_addr)) {
+        std::cerr << "Follower did not acknowledge the UDP handshake.\n";
+        std::cerr << "Check follower IP/port, firewall rules, and ensure option 4 is already running.\n";
+        close(sock);
+        leader_io.end();
+        return 1;
+    }
+    std::cout << "Follower handshake ACK received.\n";
+
     std::vector<JointRef> refs(paired_ids.size());
 
     // Phase 1: capture leader reference and compute initial follower alignment.
     std::cout << "\nCapturing leader reference pose and preparing initial follower alignment...\n";
     std::cout << "Do NOT touch the arms.\n";
 
-    FollowPacket align_pkt{};
+    FollowPacketData align_pkt{};
     align_pkt.count = static_cast<int>(paired_ids.size());
 
     for (size_t i = 0; i < paired_ids.size(); ++i) {
@@ -364,7 +430,7 @@ int run_lerobot_hybrid_mode(const std::string& leader_yaml,
 
     // Phase 3: relative follow
     while (true) {
-        FollowPacket pkt{};
+        FollowPacketData pkt{};
         pkt.count = static_cast<int>(paired_ids.size());
 
         for (size_t i = 0; i < paired_ids.size(); ++i) {

@@ -1,20 +1,16 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <array>
 #include <cstring>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include "common_servo.hpp"
+#include "follow_protocol.hpp"
 #include "SCServo.h"
 #include "SMS_STS.h"
-
-struct FollowPacket {
-    int count;
-    int ids[16];
-    int positions[16];
-};
 
 static bool open_servo_port(SMS_STS& sm_st, const std::string& port, int baudrate) {
     if (sm_st.begin(baudrate, port.c_str())) {
@@ -95,14 +91,14 @@ int run_follower_mode(const std::string& follower_yaml, int listen_port) {
     std::cout << "Waiting for leader packets...\n";
 
     while (true) {
-        FollowPacket pkt{};
+        std::array<unsigned char, kFollowWirePacketSize> buf{};
         sockaddr_in sender_addr{};
         socklen_t sender_len = sizeof(sender_addr);
 
         ssize_t bytes = recvfrom(
             sock_fd,
-            &pkt,
-            sizeof(pkt),
+            buf.data(),
+            buf.size(),
             0,
             (sockaddr*)&sender_addr,
             &sender_len
@@ -113,11 +109,47 @@ int run_follower_mode(const std::string& follower_yaml, int listen_port) {
             continue;
         }
 
-        if (bytes < (ssize_t)sizeof(int)) {
-            std::cerr << "Received packet too small.\n";
+        FollowWireMessage msg{};
+        if (!deserialize_follow_message(
+                buf.data(), static_cast<std::size_t>(bytes), msg)) {
+            std::cerr << "Received invalid follow packet (size=" << bytes << ").\n";
             continue;
         }
 
+        if (msg.type == FollowPacketType::HandshakeRequest) {
+            FollowWireMessage ack{};
+            ack.type = FollowPacketType::HandshakeAck;
+
+            std::array<unsigned char, kFollowWirePacketSize> ack_buf{};
+            serialize_follow_message(ack, ack_buf);
+
+            ssize_t sent = sendto(
+                sock_fd,
+                ack_buf.data(),
+                ack_buf.size(),
+                0,
+                (sockaddr*)&sender_addr,
+                sender_len
+            );
+
+            if (sent < 0) {
+                std::cerr << "Failed to send handshake ACK.\n";
+            } else {
+                char sender_ip[INET_ADDRSTRLEN] = {0};
+                inet_ntop(AF_INET, &sender_addr.sin_addr, sender_ip, sizeof(sender_ip));
+                std::cout << "Received handshake from " << sender_ip
+                          << ":" << ntohs(sender_addr.sin_port)
+                          << " and sent ACK.\n";
+            }
+            continue;
+        }
+
+        if (msg.type != FollowPacketType::Command) {
+            std::cerr << "Ignoring unexpected packet type.\n";
+            continue;
+        }
+
+        const FollowPacketData& pkt = msg.data;
         std::cout << "\nReceived packet with " << pkt.count << " joints\n";
 
         for (int i = 0; i < pkt.count && i < 16; ++i) {
